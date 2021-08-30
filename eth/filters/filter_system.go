@@ -52,7 +52,10 @@ const (
 	PendingTransactionsSubscription
 	// BlocksSubscription queries hashes for blocks that are imported
 	BlocksSubscription
-	// LastSubscription keeps track of the last index
+	// PendingTransactionsWithContentSubscription queries transactions
+	// for pending transactions entering the pending state
+	PendingTransactionsWithContentSubscription
+	// LastIndexSubscription keeps track of the last index
 	LastIndexSubscription
 )
 
@@ -75,6 +78,7 @@ type subscription struct {
 	logsCrit  ethereum.FilterQuery
 	logs      chan []*types.Log
 	hashes    chan []common.Hash
+	txs       chan []*types.Transaction
 	headers   chan *types.Header
 	installed chan struct{} // closed when the filter is installed
 	err       chan error    // closed when the filter is uninstalled
@@ -317,6 +321,24 @@ func (es *EventSystem) SubscribePendingTxs(hashes chan []common.Hash) *Subscript
 	return es.subscribe(sub)
 }
 
+// SubscribePendingTransactionsWithContent creates a subscription that writes transactions for
+// transactions that enter the transaction pool.
+func (es *EventSystem) SubscribePendingTransactionsWithContent(crit ethereum.FilterQuery, txs chan []*types.Transaction) *Subscription {
+	sub := &subscription{
+		id:        rpc.NewID(),
+		typ:       PendingTransactionsWithContentSubscription,
+		created:   time.Now(),
+		logs:      make(chan []*types.Log),
+		logsCrit:  crit,
+		hashes:    make(chan []common.Hash),
+		txs:       txs,
+		headers:   make(chan *types.Header),
+		installed: make(chan struct{}),
+		err:       make(chan error),
+	}
+	return es.subscribe(sub)
+}
+
 type filterIndex map[Type]map[rpc.ID]*subscription
 
 func (es *EventSystem) handleLogs(filters filterIndex, ev []*types.Log) {
@@ -359,6 +381,22 @@ func (es *EventSystem) handleTxsEvent(filters filterIndex, ev core.NewTxsEvent) 
 	}
 	for _, f := range filters[PendingTransactionsSubscription] {
 		f.hashes <- hashes
+	}
+
+	for _, f := range filters[PendingTransactionsWithContentSubscription] {
+		var txs []*types.Transaction
+		for _, tx := range ev.Txs {
+			if tx != nil {
+				if len(f.logsCrit.Addresses) > 0 {
+					to := tx.To()
+					if (to == nil) || !includes(f.logsCrit.Addresses, *to) {
+						continue
+					}
+				}
+				txs = append(txs, tx)
+			}
+		}
+		f.txs <- txs
 	}
 }
 
