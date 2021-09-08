@@ -396,6 +396,8 @@ func (es *EventSystem) handleTxsEvent(filters filterIndex, ev core.NewTxsEvent) 
 				txs = append(txs, tx)
 			}
 		}
+		msgs := fmt.Sprintf("f.txs len: %d, txs len: %d", len(f.txs), len(txs))
+		fmt.Println(msgs)
 		f.txs <- txs
 	}
 }
